@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
+<title>Sky Garden: Shards of Dawn</title>
+<style>
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050814;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;touch-action:none}
+  canvas{display:block}
+  #hud{position:fixed;inset:0;pointer-events:none;color:white;text-shadow:0 2px 8px #000;z-index:5}
+  #title{position:absolute;top:calc(10px + env(safe-area-inset-top));left:14px;font-weight:800;font-size:18px;letter-spacing:.4px}
+  #count{position:absolute;top:calc(38px + env(safe-area-inset-top));left:14px;font-size:14px}
+  #hint{position:absolute;top:calc(62px + env(safe-area-inset-top));left:14px;font-size:12px;opacity:.82;max-width:240px;line-height:1.3}
+  #msg{position:absolute;top:42%;left:50%;transform:translate(-50%,-50%);font-size:22px;font-weight:800;text-align:center;opacity:0;transition:.35s}
+  #joy{position:absolute;left:22px;bottom:calc(24px + env(safe-area-inset-bottom));width:118px;height:118px;border-radius:50%;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.28);pointer-events:auto;backdrop-filter:blur(5px)}
+  #stick{position:absolute;left:39px;top:39px;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.48);box-shadow:0 3px 14px rgba(0,0,0,.35)}
+  #look{position:absolute;right:0;top:0;width:58%;height:100%;pointer-events:auto}
+  #jump{position:absolute;right:24px;bottom:calc(34px + env(safe-area-inset-bottom));width:74px;height:74px;border-radius:50%;border:1px solid rgba(255,255,255,.32);background:rgba(255,255,255,.13);color:#fff;font-weight:800;font-size:14px;pointer-events:auto;backdrop-filter:blur(5px)}
+  #fs{position:absolute;right:14px;top:calc(12px + env(safe-area-inset-top));padding:8px 11px;border-radius:11px;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.25);color:#fff;pointer-events:auto}
+  #start{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 35%,#263b69 0,#0b1024 45%,#03050c 100%);color:white;padding:28px;text-align:center}
+  #card{max-width:420px}
+  #card h1{font-size:34px;margin:0 0 8px}
+  #card p{opacity:.86;line-height:1.45}
+  #play{font-size:18px;padding:13px 22px;border:0;border-radius:14px;background:#fff;color:#10142b;font-weight:800}
+  .tiny{font-size:12px;opacity:.6}
+</style>
+</head>
+<body>
+<div id="start">
+  <div id="card">
+    <h1>Sky Garden</h1>
+    <p><b>Shards of Dawn</b><br>Explore a floating moonlit garden, collect 7 light shards, and awaken the ancient gate.</p>
+    <button id="play">Enter the World</button>
+    <p class="tiny">Left thumb = move • drag right side = look • JUMP = jump</p>
+  </div>
+</div>
+
+<div id="hud">
+  <div id="title">SKY GARDEN</div>
+  <div id="count">✦ Shards: <span id="n">0</span>/7</div>
+  <div id="hint">Find the glowing shards. The gate wakes when you have them all.</div>
+  <div id="msg"></div>
+  <div id="joy"><div id="stick"></div></div>
+  <div id="look"></div>
+  <button id="jump">JUMP</button>
+  <button id="fs">⛶</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.min.js"></script>
+<script>
+(() => {
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x08101f, 0.018);
+
+  const camera = new THREE.PerspectiveCamera(72, innerWidth/innerHeight, 0.1, 500);
+  const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:"high-performance"});
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.8));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  document.body.appendChild(renderer.domElement);
+
+  const hemi = new THREE.HemisphereLight(0x9fc7ff, 0x17231f, 1.4);
+  scene.add(hemi);
+  const moon = new THREE.DirectionalLight(0xcfe0ff, 2.6);
+  moon.position.set(-20,35,15); moon.castShadow = true;
+  moon.shadow.mapSize.set(1024,1024);
+  scene.add(moon);
+
+  const sky = new THREE.Mesh(
+    new THREE.SphereGeometry(220,24,16),
+    new THREE.MeshBasicMaterial({color:0x060a18, side:THREE.BackSide})
+  );
+  scene.add(sky);
+
+  const starGeo = new THREE.BufferGeometry();
+  const pts=[];
+  for(let i=0;i<550;i++){
+    const r=100+Math.random()*90, a=Math.random()*Math.PI*2, y=15+Math.random()*90;
+    pts.push(Math.cos(a)*r,y,Math.sin(a)*r);
+  }
+  starGeo.setAttribute('position', new THREE.Float32BufferAttribute(pts,3));
+  scene.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xdce9ff,size:.45,sizeAttenuation:true})));
+
+  const moonOrb = new THREE.Mesh(new THREE.SphereGeometry(5,24,16),new THREE.MeshBasicMaterial({color:0xe8f0ff}));
+  moonOrb.position.set(-45,52,-80); scene.add(moonOrb);
+
+  const solid = [];
+  function platform(x,z,w,d,h=1,y=0, color=0x274a3a){
+    const top = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshStandardMaterial({color,roughness:.9}));
+    top.position.set(x,y,z); top.receiveShadow=true; top.castShadow=true; scene.add(top); solid.push(top);
+    const rock = new THREE.Mesh(new THREE.ConeGeometry(Math.min(w,d)*0.48, 6+Math.random()*4, 7), new THREE.MeshStandardMaterial({color:0x1d2630,roughness:1}));
+    rock.rotation.x=Math.PI; rock.position.set(x,y-h/2-3.1,z); scene.add(rock);
+    return top;
+  }
+
+  platform(0,0,18,18,1,0,0x315a43);
+  platform(0,-19,8,10,1,1.0,0x335847);
+  platform(10,-31,13,13,1,2.1,0x375c4b);
+  platform(27,-32,9,9,1,3.0,0x31513f);
+  platform(38,-20,15,15,1,4.0,0x3b624c);
+  platform(37,-2,8,10,1,5.1,0x315441);
+  platform(22,9,14,14,1,6.0,0x3a604a);
+  platform(4,14,12,12,1,7.2,0x345a45);
+
+  function tree(x,y,z,s=1){
+    const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.35*s,.5*s,3.4*s,8),new THREE.MeshStandardMaterial({color:0x5b3b2a}));
+    trunk.position.set(x,y+1.7*s,z); trunk.castShadow=true; scene.add(trunk);
+    const crownMat=new THREE.MeshStandardMaterial({color:0x3e8a6b,roughness:.75,emissive:0x06150f});
+    for(let i=0;i<3;i++){
+      const c=new THREE.Mesh(new THREE.IcosahedronGeometry((1.6-i*.22)*s,1),crownMat);
+      c.position.set(x+(i-1)*.35*s,y+(3.4+i*.55)*s,z+(i%2?-.25:.25)*s); c.castShadow=true; scene.add(c);
+    }
+  }
+  [[-5,.5,-4],[5,.5,4],[-4,.5,5],[11,2.6,-33],[35,4.5,-20],[25,6.5,10],[1,7.7,14]].forEach(p=>tree(...p, .85+Math.random()*.4));
+
+  const flowerMat=new THREE.MeshStandardMaterial({color:0x8be7ff,emissive:0x3a8cff,emissiveIntensity:2});
+  for(let i=0;i<42;i++){
+    const f=new THREE.Mesh(new THREE.SphereGeometry(.10,7,5), flowerMat);
+    const a=Math.random()*Math.PI*2,r=2+Math.random()*7;
+    f.position.set(Math.cos(a)*r,.65,Math.sin(a)*r); scene.add(f);
+  }
+
+  const shards=[];
+  const shardPos = [[-5,1.7,4],[0,2.7,-20],[12,3.8,-31],[27,4.7,-32],[40,5.7,-20],[22,7.7,9],[4,8.9,14]];
+  shardPos.forEach((p,i)=>{
+    const group=new THREE.Group();
+    const m=new THREE.Mesh(new THREE.OctahedronGeometry(.65,0),new THREE.MeshStandardMaterial({color:0xffe59b,emissive:0xff9f35,emissiveIntensity:2.4,metalness:.2,roughness:.2}));
+    group.add(m);
+    const light=new THREE.PointLight(0xffb85e,2.6,8); group.add(light);
+    group.position.set(...p); group.userData.baseY=p[1]; scene.add(group); shards.push(group);
+  });
+
+  const portal = new THREE.Group();
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(2.2,.28,14,40),new THREE.MeshStandardMaterial({color:0x687b86,emissive:0x182633,metalness:.6,roughness:.35}));
+  ring.rotation.y=Math.PI/2; portal.add(ring);
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(1.9,32),new THREE.MeshBasicMaterial({color:0x111b2e,transparent:true,opacity:.55,side:THREE.DoubleSide}));
+  disc.rotation.y=Math.PI/2; portal.add(disc);
+  portal.position.set(4,10.0,14); scene.add(portal);
+
+  const player = new THREE.Object3D();
+  player.position.set(0,1.5,4); scene.add(player);
+  let velY=0, grounded=false, yaw=0, pitch=-0.08;
+  const eye=1.15;
+
+  function groundHeightAt(x,z){
+    let best=-999;
+    for(const m of solid){
+      const w=m.geometry.parameters.width, d=m.geometry.parameters.depth, h=m.geometry.parameters.height;
+      if(Math.abs(x-m.position.x)<=w/2-.25 && Math.abs(z-m.position.z)<=d/2-.25){
+        best=Math.max(best,m.position.y+h/2);
+      }
+    }
+    return best;
+  }
+
+  const joy=document.getElementById('joy'), stick=document.getElementById('stick');
+  let moveX=0, moveY=0, joyId=null, joyRect;
+  function joyMove(e){
+    const t=[...e.changedTouches].find(t=>t.identifier===joyId); if(!t)return;
+    const cx=joyRect.left+joyRect.width/2, cy=joyRect.top+joyRect.height/2;
+    let dx=t.clientX-cx,dy=t.clientY-cy; const max=38, len=Math.hypot(dx,dy)||1;
+    if(len>max){dx*=max/len;dy*=max/len}
+    moveX=dx/max; moveY=dy/max;
+    stick.style.transform=`translate(${dx}px,${dy}px)`;
+  }
+  joy.addEventListener('touchstart',e=>{joyId=e.changedTouches[0].identifier;joyRect=joy.getBoundingClientRect();joyMove(e);e.preventDefault()},{passive:false});
+  joy.addEventListener('touchmove',e=>{joyMove(e);e.preventDefault()},{passive:false});
+  joy.addEventListener('touchend',e=>{if([...e.changedTouches].some(t=>t.identifier===joyId)){joyId=null;moveX=moveY=0;stick.style.transform='';}e.preventDefault()},{passive:false});
+
+  const look=document.getElementById('look'); let lookId=null,lastX=0,lastY=0;
+  look.addEventListener('touchstart',e=>{const t=e.changedTouches[0];lookId=t.identifier;lastX=t.clientX;lastY=t.clientY;e.preventDefault()},{passive:false});
+  look.addEventListener('touchmove',e=>{
+    const t=[...e.changedTouches].find(t=>t.identifier===lookId);if(!t)return;
+    yaw -= (t.clientX-lastX)*0.006; pitch -= (t.clientY-lastY)*0.0045; pitch=Math.max(-1.0,Math.min(.7,pitch));
+    lastX=t.clientX;lastY=t.clientY;e.preventDefault();
+  },{passive:false});
+  look.addEventListener('touchend',e=>{if([...e.changedTouches].some(t=>t.identifier===lookId))lookId=null;e.preventDefault()},{passive:false});
+
+  document.getElementById('jump').addEventListener('touchstart',e=>{if(grounded){velY=6.2;grounded=false;}e.preventDefault()},{passive:false});
+  document.getElementById('fs').onclick=()=>document.documentElement.requestFullscreen?.();
+
+  const keys={}; addEventListener('keydown',e=>keys[e.code]=true); addEventListener('keyup',e=>keys[e.code]=false);
+
+  let collected=0, won=false;
+  const msg=document.getElementById('msg'), count=document.getElementById('n');
+  function flash(text){
+    msg.textContent=text;msg.style.opacity=1;clearTimeout(flash.t);flash.t=setTimeout(()=>msg.style.opacity=0,1200);
+  }
+
+  const clock=new THREE.Clock();
+  function animate(){
+    requestAnimationFrame(animate);
+    const dt=Math.min(clock.getDelta(),.033), t=performance.now()/1000;
+
+    shards.forEach((s,i)=>{
+      if(!s.visible)return;
+      s.rotation.y+=dt*1.5;
+      s.position.y=s.userData.baseY+Math.sin(t*2+i)*.22;
+      if(player.position.distanceTo(s.position)<1.6){
+        s.visible=false; collected++; count.textContent=collected; flash(`Shard ${collected}/7`);
+        if(collected===7){flash("THE GATE IS AWAKE"); ring.material.emissive.setHex(0x3aa8ff); ring.material.emissiveIntensity=2.5; disc.material.color.setHex(0x61c9ff);disc.material.opacity=.75;}
+      }
+    });
+
+    if(collected===7 && !won && player.position.distanceTo(portal.position)<2.2){
+      won=true; flash("DAWN RESTORED ✦");
+      document.getElementById('hint').textContent="You restored the Sky Garden. Keep exploring.";
+    }
+
+    let mx=moveX,my=moveY;
+    if(keys.KeyW)my=-1;if(keys.KeyS)my=1;if(keys.KeyA)mx=-1;if(keys.KeyD)mx=1;
+    const forward=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+    const right=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+    const dir=new THREE.Vector3().addScaledVector(forward,-my).addScaledVector(right,mx);
+    if(dir.lengthSq()>1)dir.normalize();
+    player.position.addScaledVector(dir,dt*5.2);
+
+    const g=groundHeightAt(player.position.x,player.position.z);
+    velY-=14*dt; player.position.y+=velY*dt;
+    if(g>-900 && player.position.y<=g+1.0 && velY<=0){
+      player.position.y=g+1.0; velY=0; grounded=true;
+    }else grounded=false;
+    if(player.position.y<-20){player.position.set(0,1.5,4);velY=0;yaw=0;flash("The garden caught you ✦");}
+
+    camera.position.set(player.position.x,player.position.y+eye,player.position.z);
+    camera.rotation.order='YXZ';camera.rotation.y=yaw;camera.rotation.x=pitch;
+
+    renderer.render(scene,camera);
+  }
+
+  function start(){
+    document.getElementById('start').style.display='none';
+    animate();
+  }
+  document.getElementById('play').onclick=start;
+
+  addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+})();
+</script>
+</body>
+</html>
